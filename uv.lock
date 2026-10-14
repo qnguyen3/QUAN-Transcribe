@@ -399,6 +399,12 @@ wheels = [
 ]
 
 [[package]]
+name = "kenlm"
+version = "0.3.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/02/6e/f4e159cef39ea4ef2244b4aa32857d447d60a5d0ee269e1b1f8d3723c03e/kenlm-0.3.0.tar.gz", hash = "sha256:c4628bb9fb63c8a6f9240035b8b037385cfc404cb72e933cf48878291edac1e8", size = 427500, upload-time = "2025-04-07T13:26:38.795Z" }
+
+[[package]]
 name = "markdown-it-py"
 version = "4.2.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1090,9 +1096,15 @@ dependencies = [
     { name = "transformers" },
 ]
 
+[package.optional-dependencies]
+lm = [
+    { name = "kenlm" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "huggingface-hub" },
+    { name = "kenlm", marker = "extra == 'lm'" },
     { name = "numpy" },
     { name = "safetensors" },
     { name = "sounddevice" },
@@ -1101,6 +1113,7 @@ requires-dist = [
     { name = "torch", specifier = ">=2.6" },
     { name = "transformers", specifier = ">=5.19" },
 ]
+provides-extras = ["lm"]
 
 [[package]]
 name = "regex"

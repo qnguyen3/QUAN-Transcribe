@@ -3,7 +3,7 @@
 The current utterance is re-decoded in streaming mode each time a new 0.48 s chunk of audio arrives. Streaming mode
 never looks more than one chunk ahead, so the text from finished chunks stays put and only the newest words can still
 change. An utterance ends after a pause with no new tokens; it is then decoded once more with full context (more
-accurate), printed on its own line, and the buffer starts over.
+accurate, and with the n-gram LM if one is loaded), printed on its own line, and the buffer starts over.
 """
 
 import queue
@@ -23,10 +23,16 @@ class LiveSession:
     """Incremental decoding of a 16 kHz mono stream. Feed audio with accept(); see the module docstring."""
 
     def __init__(
-        self, asr, left_chunks: int | None = None, endpoint_s: float = 0.8, max_utterance_s: float = 30.0
+        self,
+        asr,
+        left_chunks: int | None = None,
+        endpoint_s: float = 0.8,
+        max_utterance_s: float = 30.0,
+        beam_width: int = 32,
     ):
         self.asr = asr
         self.left_chunks = left_chunks
+        self.beam_width = beam_width
         self.endpoint_frames = round(endpoint_s * SAMPLE_RATE / FRAME_SAMPLES)
         self.max_utterance_s = max_utterance_s
         self.buf = np.zeros(0, dtype=np.float32)
@@ -64,7 +70,7 @@ class LiveSession:
         return text
 
     def _final(self, wav: np.ndarray) -> str:
-        return self.asr.decode_units(greedy_decode(*self.asr._forward([wav], False, None))[0])
+        return self.asr._run([wav], False, None, self.asr.lm_decoder, self.beam_width)[0]
 
 
 def list_input_devices() -> str:
@@ -79,13 +85,14 @@ def transcribe_microphone(
     left_chunks: int | None = None,
     endpoint_s: float = 0.8,
     max_utterance_s: float = 30.0,
+    beam_width: int = 32,
     out=sys.stdout,
 ) -> None:
     """Transcribe the microphone until Ctrl+C. Finished utterances are printed one per line; on a terminal the
     utterance in progress is shown (dimmed) and updated in place."""
     import sounddevice as sd
 
-    session = LiveSession(asr, left_chunks, endpoint_s, max_utterance_s)
+    session = LiveSession(asr, left_chunks, endpoint_s, max_utterance_s, beam_width)
     step = asr.model.cfg.chunk_frames * FRAME_SAMPLES  # decode once per streaming chunk (0.48 s)
     tty = out.isatty()
 
