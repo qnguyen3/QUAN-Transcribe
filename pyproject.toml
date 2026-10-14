@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "quan-transcribe"
+version = "1.0.0"
+description = "Fast Vietnamese speech recognition (offline and streaming) on EmbeddingGemma 2"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "torch>=2.6",
+    "transformers>=5.19",  # EmbeddingGemma 2 support
+    "huggingface_hub",
+    "safetensors",
+    "numpy",
+    "soundfile>=0.12",  # libsndfile >= 1.1 for mp3 decoding
+    "soxr",
+]
+
+[project.urls]
+Model = "https://huggingface.co/qnguyen3/QUAN-Transcribe-1.0"
+
+[project.scripts]
+quan-transcribe = "quan_transcribe.cli:main"
+
+[tool.setuptools]
+packages = ["quan_transcribe"]
