@@ -10,6 +10,14 @@ encoder with a CTC reader. One forward pass per utterance, no autoregressive dec
 pip install git+https://github.com/qnguyen3/QUAN-Transcribe
 ```
 
+For development, with [uv](https://docs.astral.sh/uv/):
+
+```bash
+git clone https://github.com/qnguyen3/QUAN-Transcribe && cd QUAN-Transcribe
+uv sync
+uv run quan-transcribe --mic
+```
+
 Install the PyTorch build that matches your CUDA driver first if needed (e.g.
 `pip install torch --index-url https://download.pytorch.org/whl/cu126`).
 
@@ -22,6 +30,7 @@ and log in with `hf auth login` (or set `HF_TOKEN`).
 quan-transcribe audio.wav
 quan-transcribe --streaming audio.wav
 quan-transcribe -v *.mp3          # several files, with duration and speed
+quan-transcribe --mic             # live from the microphone, Ctrl+C to stop
 ```
 
 ```python
@@ -40,7 +49,7 @@ texts = asr.transcribe([wav_a, wav_b], sample_rate=16000)
 - **Output:** lowercase Vietnamese without punctuation, numbers written as words.
 - **Long audio:** recordings are cut into pieces of at most 30 s at quiet points (`chunk_seconds`) and decoded in
   batches.
-- **Device:** CUDA if available (bf16), otherwise CPU (fp32). Choose with `device=` / `--device`.
+- **Device:** CUDA if available (bf16), then Apple Silicon GPU (`mps`, fp32), otherwise CPU (fp32). Choose with `device=` / `--device`.
 - **Memory:** lower `batch_seconds` / `--batch-seconds` (default 600 s of padded audio per forward pass) if you run
   out of memory.
 
@@ -51,8 +60,35 @@ texts = asr.transcribe([wav_a, wav_b], sample_rate=16000)
 convolution is causal, so nothing looks more than one chunk ahead. `left_chunks` / `--left-chunks` limits how many
 past chunks the reader sees (default: all).
 
-This mode runs over a complete file and returns the transcript a streaming deployment would produce. It does not
-include a live microphone API.
+This mode runs over a complete file and returns the transcript a streaming deployment would produce.
+
+### Live microphone
+
+`quan-transcribe --mic` transcribes what you say while you say it. The sentence in progress is shown dimmed and
+updated every 0.48 s. Streaming mode keeps the text from finished chunks fixed, so only the newest words can change.
+After a pause (`--endpoint`, default 0.8 s) the sentence is decoded once more with full context and printed on its own
+line. If you talk for longer than `--chunk-seconds` without pausing, the sentence is cut at a quiet point. With `--lm`
+(see below), the final line is decoded with the n-gram LM.
+
+```bash
+quan-transcribe --list-devices               # pick a microphone
+quan-transcribe --mic --input-device 1       # by index or by name
+quan-transcribe --mic > notes.txt            # when piped, only finished sentences are written
+```
+
+```python
+from quan_transcribe.live import LiveSession
+
+session = LiveSession(asr)
+for block in blocks:                          # 16 kHz mono float32 audio, any block size
+    for sentence in session.accept(block):    # finished sentences
+        print(sentence)
+    print(session.partial)                    # sentence in progress
+print(session.flush())
+```
+
+Every update decodes the current sentence again from its start, so it needs a GPU (CUDA or Apple Silicon) to keep up
+with real time. On CPU the display lags behind on long sentences.
 
 ### Optional n-gram language model
 
