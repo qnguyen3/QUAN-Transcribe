@@ -18,6 +18,9 @@ dependencies = [
     "soxr",
 ]
 
+[project.optional-dependencies]
+lm = ["kenlm"]  # n-gram LM beam search; built from source, needs a C++ compiler
+
 [project.urls]
 Model = "https://huggingface.co/qnguyen3/QUAN-Transcribe-1.0"
 
