@@ -18,6 +18,12 @@ MODEL_FILES = ["config.json", "units.json", "model.safetensors"]
 AudioInput = str | os.PathLike | np.ndarray | torch.Tensor
 
 
+def default_device() -> str:
+    if torch.cuda.is_available():
+        return "cuda"
+    return "mps" if torch.backends.mps.is_available() else "cpu"
+
+
 class QuanTranscribe:
     def __init__(self, model: QuanCTC, tokenizer, gemma_ids: list[int], device: torch.device):
         self.model = model
@@ -46,7 +52,7 @@ class QuanTranscribe:
         with open(os.path.join(path, "units.json")) as f:
             units = json.load(f)
 
-        device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+        device = torch.device(device or default_device())
         model = QuanCTC(cfg, load_encoder(cfg.encoder_id))
         # The checkpoint holds the reader + the fine-tuned top encoder layers; the rest comes from the base model.
         state = load_file(os.path.join(path, "model.safetensors"))
@@ -114,11 +120,15 @@ class QuanTranscribe:
         return out[0] if single else out
 
     def _run(self, wavs: list[np.ndarray], streaming: bool, left_chunks: int | None) -> list[str]:
+        return [self.decode_units(u) for u in greedy_decode(*self._forward(wavs, streaming, left_chunks))]
+
+    def _forward(
+        self, wavs: list[np.ndarray], streaming: bool, left_chunks: int | None
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         lens = torch.tensor([len(w) for w in wavs], dtype=torch.long)
         wav = torch.zeros(len(wavs), int(lens.max()), dtype=torch.float32)
         for i, w in enumerate(wavs):
             wav[i, : len(w)] = torch.from_numpy(w)
         on_cuda = self.device.type == "cuda"
         with torch.autocast(self.device.type, dtype=torch.bfloat16, enabled=on_cuda):
-            logits, out_lens = self.model(wav.to(self.device), lens.to(self.device), streaming, left_chunks)
-        return [self.decode_units(u) for u in greedy_decode(logits, out_lens)]
+            return self.model(wav.to(self.device), lens.to(self.device), streaming, left_chunks)

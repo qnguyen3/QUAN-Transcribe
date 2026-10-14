@@ -16,6 +16,7 @@ dependencies = [
     "numpy",
     "soundfile>=0.12",  # libsndfile >= 1.1 for mp3 decoding
     "soxr",
+    "sounddevice",  # microphone input (--mic)
 ]
 
 [project.urls]
