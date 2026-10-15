@@ -1,16 +1,41 @@
 # QUAN-Transcribe
 
+[![Model](https://img.shields.io/badge/%F0%9F%A4%97-QUAN--Transcribe--1.0-yellow)](https://huggingface.co/qnguyen3/QUAN-Transcribe-1.0)
+[![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
+[![Model license: Gemma](https://img.shields.io/badge/model%20license-Gemma%20Terms-black)](https://ai.google.dev/gemma/terms)
+
 Inference code for [QUAN-Transcribe-1.0](https://huggingface.co/qnguyen3/QUAN-Transcribe-1.0), a fast Vietnamese
 speech recognition model built on Google's [EmbeddingGemma 2](https://huggingface.co/google/embeddinggemma-2) audio
 encoder with a CTC reader. One forward pass per utterance, no autoregressive decoder.
 
+**Contents**
+
+- [Install](#install)
+- [Quickstart](#quickstart)
+- [Usage](#usage)
+  - [Streaming mode](#streaming-mode)
+  - [Live microphone](#live-microphone)
+  - [Optional n-gram language model](#optional-n-gram-language-model)
+- [Python API](#python-api)
+- [Accuracy check](#accuracy-check)
+- [Troubleshooting](#troubleshooting)
+- [License](#license)
+
 ## Install
+
+Requires **Python 3.10+** and **PyTorch 2.6+**. Microphone mode also needs a working
+[sounddevice](https://python-sounddevice.readthedocs.io/) / PortAudio backend.
 
 ```bash
 pip install git+https://github.com/qnguyen3/QUAN-Transcribe
 ```
 
-For development, with [uv](https://docs.astral.sh/uv/):
+Install the PyTorch build that matches your CUDA driver first if needed (e.g.
+`pip install torch --index-url https://download.pytorch.org/whl/cu126`).
+
+### From source (development)
+
+With [uv](https://docs.astral.sh/uv/):
 
 ```bash
 git clone https://github.com/qnguyen3/QUAN-Transcribe && cd QUAN-Transcribe
@@ -18,11 +43,23 @@ uv sync
 uv run quan-transcribe --mic
 ```
 
-Install the PyTorch build that matches your CUDA driver first if needed (e.g.
-`pip install torch --index-url https://download.pytorch.org/whl/cu126`).
+### Model access
 
 The base encoder `google/embeddinggemma-2` is downloaded on first use. It is gated: accept its terms on the model page
 and log in with `hf auth login` (or set `HF_TOKEN`).
+
+## Quickstart
+
+```bash
+quan-transcribe audio.wav
+```
+
+```python
+from quan_transcribe import QuanTranscribe
+
+asr = QuanTranscribe.from_pretrained("qnguyen3/QUAN-Transcribe-1.0")
+print(asr.transcribe("audio.wav"))
+```
 
 ## Usage
 
@@ -34,14 +71,12 @@ quan-transcribe --mic             # live from the microphone, Ctrl+C to stop
 ```
 
 ```python
-from quan_transcribe import QuanTranscribe
-
-asr = QuanTranscribe.from_pretrained("qnguyen3/QUAN-Transcribe-1.0")
-print(asr.transcribe("audio.wav"))
-print(asr.transcribe("audio.wav", streaming=True))
+# continuing from Quickstart, with the same `asr`
+print(asr.transcribe("audio.wav", streaming=True))     # streaming decoding
+print(asr.transcribe("audio.wav", use_lm=True))        # beam search (after loading an LM)
 
 # waveforms and batches work too
-texts = asr.transcribe([wav_a, wav_b], sample_rate=16000)
+texts = asr.transcribe([wav_a, wav_b], sample_rate=16000)   # -> list[str]
 ```
 
 - **Input:** any file libsndfile can read (wav, flac, ogg, mp3, ...), or a numpy/torch waveform. Audio is converted
@@ -115,6 +150,51 @@ asr.transcribe("audio.wav", use_lm=False)    # greedy
   [Leipzig Corpora Collection](https://wortschatz.uni-leipzig.de/en/download/Vietnamese) (news 2022, Wikipedia
   2021), plus training transcripts.
 
+## Python API
+
+```python
+from quan_transcribe import QuanTranscribe
+
+asr = QuanTranscribe.from_pretrained(
+    "qnguyen3/QUAN-Transcribe-1.0",  # HF repo id or a local directory
+    device=None,                     # "cuda", "cuda:1", "mps", "cpu" (default: auto)
+    revision=None,                   # HF revision / commit
+    token=None,                      # HF token for gated downloads
+    lm=False,                        # True loads the shipped LM; a path loads your own
+)
+
+asr.transcribe("audio.wav")                        # -> str
+asr.transcribe(["a.wav", "b.wav"])                 # -> list[str]
+asr.transcribe(wav, sample_rate=16000)             # numpy / torch waveform
+asr.transcribe("audio.wav", streaming=True)        # streaming decoding
+asr.transcribe("audio.wav", beam_width=8)          # smaller LM beam
+```
+
+`transcribe` arguments:
+
+| argument | default | meaning |
+|---|---|---|
+| `audio` | — | file path, waveform, or a list of either (a list returns a list) |
+| `sample_rate` | 16000 | sample rate of a waveform input |
+| `streaming` | `False` | decode as a streaming deployment would (0.48 s chunks, no lookahead) |
+| `left_chunks` | `None` | streaming: past chunks the reader may attend to (`None` = all) |
+| `chunk_seconds` | 30.0 | long audio is cut into pieces of at most this length, at quiet points |
+| `batch_seconds` | 600.0 | padded audio per forward pass; lower it if you run out of memory |
+| `use_lm` | `None` | force beam search on (`True`) or greedy (`False`) regardless of the loaded LM |
+| `beam_width` | 32 | beams kept by the LM beam search |
+
+| helper | purpose |
+|---|---|
+| `QuanTranscribe.from_pretrained(...)` | build a model from an HF repo id or a local directory |
+| `asr.load_lm(path, unigrams=None, alpha=None, beta=None)` | attach a KenLM model after construction |
+| `asr.decode_units(unit_ids)` | map CTC unit ids to text |
+| `quan_transcribe.live.LiveSession` | incremental decoding for a stream of audio blocks |
+| `quan_transcribe.live.transcribe_microphone(asr, ...)` | the `--mic` loop as a function |
+
+CLI flags: `--model`, `--device`, `--streaming`, `--left-chunks`, `--chunk-seconds`, `--batch-seconds`, `--lm`,
+`--lm-path`, `--beam-width`, `--lm-alpha`, `--lm-beta`, `--mic`, `--input-device`, `--list-devices`, `--endpoint`,
+`-v/--verbose`. Run `quan-transcribe --help` for the full list.
+
 ## Accuracy check
 
 This code reproduces the training-time evaluation of the released checkpoint (FLEURS vi_vn valid, greedy: 6.71% full
@@ -131,6 +211,18 @@ These subsets exclude utterances whose reference transcript contains digits. The
 on one CPU core at beam 32 (7 ms at beam 8).
 
 See the [model card](https://huggingface.co/qnguyen3/QUAN-Transcribe-1.0) for the full benchmark.
+
+## Troubleshooting
+
+| symptom | fix |
+|---|---|
+| `401` / `403` or "gated repo" while loading | accept the terms on the [`google/embeddinggemma-2`](https://huggingface.co/google/embeddinggemma-2) page, then `hf auth login` or set `HF_TOKEN` |
+| CUDA out of memory | lower `--batch-seconds` (e.g. `60`); long files are batched together by length |
+| `no LM loaded` from `transcribe(use_lm=True)` | pass `lm=True` to `from_pretrained` or call `load_lm(path)` first |
+| `ModuleNotFoundError: kenlm` with `--lm` | `pip install "quan-transcribe[lm]"` (KenLM builds from source, needs a C++ compiler) |
+| no microphone / `--list-devices` prints nothing | install a PortAudio backend (macOS: `brew install portaudio`, Linux: `apt install libportaudio2`) and reinstall `sounddevice` |
+| mp3/flac fails to load | `soundfile` needs libsndfile >= 1.1; upgrade it (`pip install -U soundfile`) |
+| empty output on speech | the model expects 16 kHz mono; pass the correct `sample_rate` for raw waveforms |
 
 ## License
 
