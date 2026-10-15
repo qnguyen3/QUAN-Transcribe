@@ -1,0 +1,107 @@
+# Two profiles for the two deployment shapes:
+#
+#   docker compose --profile gpu up     # NVIDIA GPU
+#   docker compose --profile cpu up     # CPU only, no GPU reservation
+#
+# Both services build the same image; only the runtime configuration differs.
+# The GPU service pins nothing (the model auto-detects CUDA) and the CPU service
+# pins DEVICE=cpu and widens the micro-batch window, since CPU throughput comes
+# from batching and thread count rather than from a fast device.
+
+x-common: &common
+  build:
+    context: ..
+    dockerfile: Dockerfile
+  image: quan-asr-server:1.0.0
+  volumes:
+    # Keep the model, the EmbeddingGemma encoder and the KenLM model across
+    # container restarts. Delete this volume to force a clean re-download.
+    - hf-cache:/cache/huggingface
+  environment: &common-env
+    MODEL_PATH: qnguyen3/QUAN-Transcribe-1.0
+    SERVED_MODEL_NAME: QUAN-Transcribe-1.0
+    PRELOAD: "true"
+    # The base encoder google/embeddinggemma-2 is gated on Hugging Face.
+    # Accept its terms, then put a read token here (or in .env).
+    HF_TOKEN: ${HF_TOKEN:-}
+    # Enable the bundled 4-gram KenLM for lower WER (CPU beam search).
+    USE_LM: ${USE_LM:-false}
+    # Streaming lookback. 0 keeps latency flat; omit for best accuracy.
+    LEFT_CHUNKS: ${LEFT_CHUNKS:-}
+    LOG_LEVEL: ${LOG_LEVEL:-info}
+    # Silero VAD: skip decoding silence and cut pieces on real pauses. Off by
+    # default; the CPU profile below turns it on. Requires the 'vad' extra.
+    USE_VAD: ${USE_VAD:-false}
+    # Uncomment to require a bearer token, like OpenAI's own API.
+    # API_KEY: ${API_KEY:-}
+  restart: unless-stopped
+  healthcheck:
+    test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/ready"]
+    interval: 30s
+    timeout: 5s
+    start_period: 900s
+    retries: 5
+
+services:
+  quan-asr-server-cuda:
+    <<: *common
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: quan-asr-server:cuda
+    profiles: ["gpu", "cuda"]
+    container_name: quan-asr-server-cuda
+    ports:
+      - "8000:8000"
+    environment:
+      <<: *common-env
+      # Auto-detect: uses CUDA when the device is visible.
+      DEVICE: ${DEVICE:-cuda}
+      TF32: "true"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  quan-asr-server-cpu:
+    <<: *common
+    build:
+      context: ..
+      dockerfile: Dockerfile.cpu
+    image: quan-asr-server:cpu
+    profiles: ["cpu"]
+    container_name: quan-asr-server-cpu
+    ports:
+      - "8001:8000"
+    environment:
+      <<: *common-env
+      # Pin the device so a host that happens to expose a GPU still runs here.
+      DEVICE: cpu
+      # CPU decoding is one FP32 GEMM pipeline per core, so coalescing buys
+      # little throughput here (the cores are the bottleneck). Keep the window
+      # short: it mainly saves a launch, not compute.
+      MICROBATCH_SECONDS: ${MICROBATCH_SECONDS:-0.25}
+      MICROBATCH_MAX_WAIT_MS: ${MICROBATCH_MAX_WAIT_MS:-10}
+      # Bounded decode queue: a full queue returns 503 instead of growing
+      # latency without limit. 0 disables the cap.
+      MAX_QUEUE: ${MAX_QUEUE:-256}
+      # Cap each forward pass at 30 s of audio. On CPU one launch owns every
+      # core for its whole duration, so without this a long file would stall a
+      # live session until it finished; the cap gives the scheduler a point to
+      # preempt at. 0 disables it (fine on GPU, where a pass is milliseconds).
+      SUBBATCH_SECONDS: ${SUBBATCH_SECONDS:-30}
+      # CPU time is the scarce resource here, and call audio is mostly silence,
+      # so VAD pays for itself twice: less audio to decode and cuts on pauses.
+      USE_VAD: ${USE_VAD:-true}
+      # Unset lets torch size itself to the visible cores. Set it when the
+      # container is limited by a cgroup quota, e.g. CPU_THREADS=4.
+      CPU_THREADS: ${CPU_THREADS:-}
+      # TF32 is a CUDA-only knob; leaving it on would just be a no-op here.
+      TF32: "false"
+    # No GPU reservation: this profile must run on a CPU-only host.
+
+volumes:
+  hf-cache:

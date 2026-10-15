@@ -1,6 +1,29 @@
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
 *.egg-info/
 build/
 dist/
 .venv/
+venv/
+
+# Tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+hf-home/
+cache/
+
+# Audio fixtures written by scripts/make_sample_audio.py
+*.wav
+!tests/**/*.wav
+
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store
