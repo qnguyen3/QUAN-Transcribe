@@ -1,0 +1,94 @@
+# syntax=docker/dockerfile:1
+# Ultra-fast, lightweight CPU Dockerfile using Astral uv (~1.2 GB, builds in seconds)
+
+# --------------------------------------------------------------------------- #
+# Stage 1: Builder with uv
+# --------------------------------------------------------------------------- #
+FROM python:3.11-slim AS builder
+
+# Grab pre-compiled uv & uvx binaries from Astral official image
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+WORKDIR /build
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        git \
+        ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_PYTHON_DOWNLOADS=never
+
+# Create isolated virtual environment
+RUN uv venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Install PyTorch CPU first via uv (super fast parallel wheel download)
+RUN uv pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+COPY pyproject.toml README.md ./
+COPY app ./app
+COPY quan_transcribe ./quan_transcribe
+COPY samples ./samples
+
+ARG INSTALL_LM=true
+ARG INSTALL_VAD=true
+RUN extras="" ; \
+    if [ "$INSTALL_LM" = "true" ]; then extras="${extras}lm"; fi ; \
+    if [ "$INSTALL_VAD" = "true" ]; then extras="${extras:+$extras,}vad"; fi ; \
+    if [ -n "$extras" ]; then \
+        uv pip install ".[${extras}]" ; \
+    else \
+        uv pip install . ; \
+    fi
+
+# Clean up uv cache
+RUN rm -rf /root/.cache/uv
+
+# --------------------------------------------------------------------------- #
+# Stage 2: Minimal Production Runtime Image
+# --------------------------------------------------------------------------- #
+FROM python:3.11-slim AS runtime
+
+WORKDIR /app
+
+# Only runtime OS dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ffmpeg \
+        libsndfile1 \
+        curl \
+        ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy pre-built virtual environment from builder
+COPY --from=builder /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+COPY pyproject.toml README.md ./
+COPY app ./app
+COPY quan_transcribe ./quan_transcribe
+COPY samples ./samples
+
+ENV HF_HOME=/cache/huggingface \
+    HF_HUB_ENABLE_HF_TRANSFER=0 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    MODEL_PATH=qnguyen3/QUAN-Transcribe-1.0 \
+    SERVED_MODEL_NAME=QUAN-Transcribe-1.0 \
+    HOST=0.0.0.0 \
+    PORT=8000 \
+    DEVICE=cpu \
+    TF32=false \
+    PRELOAD=true \
+    LOG_LEVEL=info \
+    OMP_NUM_THREADS=8
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=900s --retries=5 \
+    CMD curl -fsS http://127.0.0.1:${PORT}/ready || exit 1
+
+EXPOSE 8000
+
+ENTRYPOINT ["quan-asr-server", "--serve"]
+CMD ["--host", "0.0.0.0", "--port", "8000"]

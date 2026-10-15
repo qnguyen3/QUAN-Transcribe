@@ -1,0 +1,56 @@
+syntax = "proto3";
+
+package quan.asr.v1;
+
+service Speech {
+  // Bidirectional streaming for real-time speech recognition (Google Cloud Speech style)
+  rpc StreamingRecognize(stream StreamingRecognizeRequest) returns (stream StreamingRecognizeResponse);
+
+  // Synchronous recognition for audio files
+  rpc Recognize(RecognizeRequest) returns (RecognizeResponse);
+}
+
+message StreamingRecognizeRequest {
+  oneof streaming_request {
+    StreamingRecognitionConfig streaming_config = 1;
+    bytes audio_content = 2;
+  }
+}
+
+message StreamingRecognitionConfig {
+  int32 sample_rate_hertz = 1;  // e.g. 16000
+  string encoding = 2;          // "LINEAR16", "FLOAT32", "MP3", "WAV"
+  string language_code = 3;     // "vi"
+  bool enable_punctuation = 4;
+  bool use_lm = 5;
+  int32 left_chunks = 6;
+  bool enable_phonemes = 7;
+}
+
+message StreamingRecognizeResponse {
+  repeated StreamingRecognitionResult results = 1;
+  string error_message = 2;
+}
+
+message StreamingRecognitionResult {
+  repeated SpeechRecognitionAlternative alternatives = 1;
+  bool is_final = 2;
+  float stability = 3;
+  double result_end_time = 4;
+}
+
+message SpeechRecognitionAlternative {
+  string transcript = 1;
+  float confidence = 2;
+  string phonemes = 3;
+}
+
+message RecognizeRequest {
+  StreamingRecognitionConfig config = 1;
+  bytes audio_content = 2;
+}
+
+message RecognizeResponse {
+  repeated SpeechRecognitionAlternative results = 1;
+  double total_billed_time = 2;
+}

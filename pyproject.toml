@@ -1,13 +1,14 @@
 [build-system]
-requires = ["setuptools>=64"]
+requires = ["setuptools>=64", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "quan-transcribe"
 version = "1.0.0"
-description = "Fast Vietnamese speech recognition (offline and streaming) on EmbeddingGemma 2"
+description = "Fast Vietnamese speech recognition (offline and streaming) on EmbeddingGemma 2, plus an OpenAI-compatible serving layer"
 readme = "README.md"
 requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
 dependencies = [
     "torch>=2.6",
     "transformers>=5.19",  # EmbeddingGemma 2 support
@@ -17,16 +18,50 @@ dependencies = [
     "soundfile>=0.12",  # libsndfile >= 1.1 for mp3 decoding
     "soxr",
     "sounddevice",  # microphone input (--mic)
+    # Serving layer (app/)
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "python-multipart>=0.0.9",
+    "sea-g2p>=0.10.0",
 ]
 
 [project.optional-dependencies]
 lm = ["kenlm"]  # n-gram LM beam search; built from source, needs a C++ compiler
+grpc = ["grpcio>=1.60.0", "protobuf>=4.25.0"]
+vad = ["silero-vad>=6.0", "onnxruntime>=1.16"]
+test = ["pytest>=8", "httpx>=0.27", "pytest-asyncio>=0.23"]
 
 [project.urls]
 Model = "https://huggingface.co/qnguyen3/QUAN-Transcribe-1.0"
 
 [project.scripts]
 quan-transcribe = "quan_transcribe.cli:main"
+quan-asr-server = "app.cli:main"
+quan-asr = "app.cli:main"
 
 [tool.setuptools]
-packages = ["quan_transcribe"]
+packages = ["quan_transcribe", "app", "app.proto"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+# The upstream inference library is not linted with the server's rules.
+exclude = ["quan_transcribe"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM", "RUF"]
+ignore = [
+    "E501", # long lines are handled by the formatter, not the linter
+]
+
+[tool.ruff.lint.per-file-ignores]
+# FastAPI's dependency injection is built around calls in argument defaults.
+"app/server.py" = ["B008"]
+"tests/*" = ["B008"]
+# protoc-generated code: never hand-edited, so style rules do not apply.
+"app/proto/*_pb2.py" = ["UP009", "I001", "F401", "E501"]
+"app/proto/*_pb2_grpc.py" = ["I001", "F401", "E501"]

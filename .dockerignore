@@ -1,0 +1,45 @@
+# Keep the build context small: only pyproject.toml, README.md, app/ and
+# quan_transcribe/ are copied into the image, so anything else is dead weight in
+# the build cache.
+
+.git
+.gitignore
+.venv
+venv
+__pycache__
+*.py[cod]
+*.egg-info
+.pytest_cache
+.ruff_cache
+.mypy_cache
+
+# Local model caches must never be baked into an image.
+cache
+models
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.onnx
+
+# Fixtures and scratch audio. The sample clips under samples/ are the one
+# exception: the image ships them so the playground's demo chips work offline.
+tests/audio
+*.wav
+*.mp3
+*.flac
+*.m4a
+*.webm
+!samples/*.mp3
+
+docker
+scripts
+tests
+# NOTE: README.md must stay in the context: the Dockerfile copies it because
+# pyproject.toml declares `readme = "README.md"`, and setuptools reads it when
+# building the wheel inside the image.
+Dockerfile
+.env
+.env.*
+*.log
+.DS_Store
