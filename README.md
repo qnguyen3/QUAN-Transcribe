@@ -10,16 +10,16 @@ Inference code **and** an OpenAI-compatible serving layer for
 built on Google's [EmbeddingGemma 2](https://huggingface.co/google/embeddinggemma-2) audio encoder with a CTC reader.
 One forward pass per utterance, no autoregressive decoder.
 
-This repository holds two parts that install together:
+The repository has two parts that install together:
 
 - **Library** (`quan_transcribe/`) — the inference package and the `quan-transcribe` CLI: offline, streaming and
-  live-microphone decoding, plus an optional KenLM n-gram LM. Everything below up to *Server*.
+  live-microphone decoding, plus an optional KenLM n-gram LM. Covered by [Install](#install) through
+  [Troubleshooting](#troubleshooting).
 - **Server** (`app/`) — `quan-asr-server`, an OpenAI-compatible HTTP / SSE / WebSocket API around the library, with a
-  scheduler that keeps live audio responsive under load, a browser playground, and a container for GPUStack.
+  scheduler that keeps live audio responsive under load, a browser playground, and a container for GPUStack. See
+  [Server](#server-quan-asr-server).
 
 **Contents**
-
-*Library*
 
 - [Install](#install)
   - [From source (development)](#from-source-development)
@@ -32,22 +32,20 @@ This repository holds two parts that install together:
 - [Python API](#python-api)
 - [Accuracy check](#accuracy-check)
 - [Troubleshooting](#troubleshooting)
-- [License](#license)
-
-*Server* — [`quan-asr-server`](#quan-asr-server)
-
-- [Architecture](#architecture)
-- [Quick start](#quick-start)
-- [API](#api)
-- [Errors and limits](#errors-and-limits)
-- [Observability](#observability)
-- [Streaming](#streaming)
-- [Optional n-gram language model (serving)](#optional-n-gram-language-model-serving)
-- [Voice activity detection](#voice-activity-detection)
-- [Configuration](#configuration)
-- [Performance](#performance)
-- [Docker](#docker)
-- [Development](#development)
+- [Server (`quan-asr-server`)](#server-quan-asr-server)
+  - [Architecture](#architecture)
+  - [Quick start](#quick-start)
+  - [API](#api)
+  - [Errors and limits](#errors-and-limits)
+  - [Observability](#observability)
+  - [Streaming](#streaming)
+  - [Language model (serving)](#language-model-serving)
+  - [Voice activity detection](#voice-activity-detection)
+  - [Configuration](#configuration)
+  - [Performance](#performance)
+  - [Docker](#docker)
+  - [Development](#development)
+- [Credits](#credits)
 - [Licence](#licence)
 
 ## Install
@@ -253,14 +251,7 @@ See the [model card](https://huggingface.co/qnguyen3/QUAN-Transcribe-1.0) for th
 | mp3/flac fails to load | `soundfile` needs libsndfile >= 1.1; upgrade it (`pip install -U soundfile`) |
 | empty output on speech | the model expects 16 kHz mono; pass the correct `sample_rate` for raw waveforms |
 
-## License
-
-The model weights are a derivative of EmbeddingGemma 2 and are subject to the
-[Gemma Terms of Use](https://ai.google.dev/gemma/terms).
-
----
-
-# QUAN-ASR Server
+## Server (`quan-asr-server`)
 
 An OpenAI-compatible speech-to-text server for
 [`qnguyen3/QUAN-Transcribe-1.0`](https://huggingface.co/qnguyen3/QUAN-Transcribe-1.0),
@@ -280,7 +271,7 @@ makes it roughly **3,700× faster than realtime on a single H100** (upstream
 benchmark) and makes its output lowercase Vietnamese without punctuation, with
 numbers written as words.
 
-### What this repository is
+### What the server is
 
 - A **serving layer**, not a training repo. It wraps the upstream
   [`quan_transcribe`](https://github.com/qnguyen3/QUAN-Transcribe) inference
@@ -292,7 +283,7 @@ numbers written as words.
 - **Single-model and Vietnamese-only.** It is not a multi-tenant, multi-model
   router, and it will not transcribe other languages correctly.
 
-## Architecture
+### Architecture
 
 ```
                      ┌──────────────── app/server.py (FastAPI) ───────────────┐
@@ -334,7 +325,7 @@ Three invariants make the rest of the document make sense:
    ever looks more than one chunk ahead — the partial text is what the model
    would have produced if the audio stopped there.
 
-## Quick start
+### Quick start
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
@@ -359,7 +350,7 @@ curl -s -F "file=@samples/voicemail-90s.mp3" http://127.0.0.1:8000/v1/audio/tran
 Open <http://127.0.0.1:8000/> for the playground: upload a file to watch the
 streamed transcript, or hold the record button to transcribe from the mic.
 
-### Requirements
+#### Requirements
 
 - **Python 3.10+.** The container ships 3.11; this repository is developed and
   tested on 3.11 and 3.14.
@@ -375,7 +366,7 @@ streamed transcript, or hold the record button to transcribe from the mic.
 
 [`google/embeddinggemma-2`]: https://huggingface.co/google/embeddinggemma-2
 
-## API
+### API
 
 | Method | Path | Auth | Purpose |
 | --- | --- | --- | --- |
@@ -394,7 +385,7 @@ streamed transcript, or hold the record button to transcribe from the mic.
 above are always open, which is deliberate: an orchestrator must be able to probe
 `/health` without credentials.
 
-### `POST /v1/audio/transcriptions`
+#### `POST /v1/audio/transcriptions`
 
 `multipart/form-data`. The endpoint accepts the documented OpenAI parameters:
 
@@ -471,7 +462,7 @@ timestamps are the finest granularity available: `words` is always `[]` and the
 per-token alignment. `timestamp_granularities[]` is accepted for compatibility
 and only affects whether that merge is suppressed.
 
-#### Model aliases
+##### Model aliases
 
 `_check_model` accepts anything that identifies the served model, so clients do
 not need to know the deployment's exact name:
@@ -484,7 +475,7 @@ not need to know the deployment's exact name:
 Anything else is `404 model_not_found`. The alias list is what makes this a
 drop-in replacement for code that hard-codes `model="whisper-1"`.
 
-## Errors and limits
+### Errors and limits
 
 Every error from the HTTP endpoints uses OpenAI's envelope:
 
@@ -524,9 +515,9 @@ for WebSocket sessions, `chunk_seconds` ∈ [1, 300], `beam_width` ∈ [1, 256],
 `temperature` ∈ [0, 1], `left_chunks` ≥ 0, and the two queue caps `MAX_QUEUE` /
 `MAX_INTERACTIVE` (503).
 
-## Observability
+### Observability
 
-### `GET /health`
+#### `GET /health`
 
 Always `200` while the model is loading, and only `503` after a **hard** load
 failure. That is deliberate: an orchestrator probe must not restart a container
@@ -542,7 +533,7 @@ failed — with the exception text in `error`. `device` reports the resolved dev
 (`cuda:0`, `mps`, `cpu`) once loaded, and the configured value or `unknown`
 before that.
 
-### `GET /metrics`
+#### `GET /metrics`
 
 `{**engine.metrics(), **engine.info()}` — request counters, resolved
 configuration, and the scheduler's own view:
@@ -567,9 +558,9 @@ direct answer to "is coalescing working and am I shedding load?":
 - `p50_latency_ms` / `p95_latency_ms` are over a rolling window of the last 4096
   jobs (null until there is a sample).
 
-## Streaming
+### Streaming
 
-### Server-Sent Events
+#### Server-Sent Events
 
 Set `stream=true` and the response is `text/event-stream` with
 `Cache-Control: no-cache, no-transform` and `X-Accel-Buffering: no` (so nginx
@@ -595,7 +586,7 @@ If the client disconnects, the server sets a stop flag and stops decoding at the
 next event boundary instead of finishing a file nobody is reading. `stop` is
 checked *between* steps, so an in-flight forward pass still completes.
 
-### WebSocket
+#### WebSocket
 
 `/v1/audio/transcriptions/stream` is for live microphone audio. All parameters
 are **query-string** parameters — there is no handshake frame:
@@ -691,7 +682,7 @@ asyncio.run(main())
 can point at any running server. It needs the `websockets` package, which
 `uvicorn[standard]` already pulls in.
 
-### How streaming stays honest
+#### How streaming stays honest
 
 The encoder attention is chunked with left context only, the reader's
 convolution is causal, and the reader attends to the current 0.48 s chunk plus
@@ -704,7 +695,7 @@ Live utterances are also segmented: `ENDPOINT_SECONDS` of silence (`0.8`)
 finalises a sentence, and one is force-cut at a quiet point after
 `MAX_UTTERANCE_SECONDS` (`30`).
 
-## Optional n-gram language model (serving)
+### Language model (serving)
 
 By default the server decodes greedily. Turning on the language model swaps in
 CTC prefix beam search against a 4-gram KenLM, which improves accuracy on
@@ -759,7 +750,7 @@ pip install ".[lm]"
 In Docker this is gated by `--build-arg INSTALL_LM=false` if you would rather
 skip the compile entirely and ship a greedy-only image.
 
-## Voice activity detection
+### Voice activity detection
 
 Call and voicemail audio is mostly *not* speech. A measured 90 s voicemail
 greeting in `samples/` is 78 s of digital silence and ringback tone and 7 s of
@@ -801,14 +792,14 @@ pip install ".[vad]"     # silero-vad + onnxruntime; the image already ships it
 If the package is missing while `USE_VAD=true`, the server logs a warning and
 falls back to energy-based splitting for that request rather than failing it.
 
-## Configuration
+### Configuration
 
 Every setting is an environment variable, so the same image works for
 GPUStack, `docker run`, and the CLI. A CLI flag beats the environment, because
 the CLI writes each non-default flag into the environment before the settings
 are read.
 
-### Model
+#### Model
 
 | Variable | Default | Notes |
 | --- | --- | --- |
@@ -818,7 +809,7 @@ are read.
 | `HF_TOKEN` | – | For the gated audio encoder |
 | `PRELOAD` | `true` | Load at startup rather than on the first request |
 
-### Decoding
+#### Decoding
 
 | Variable | Default | Notes |
 | --- | --- | --- |
@@ -832,7 +823,7 @@ are read.
 | `BATCH_SECONDS` | `600.0` | Padding budget per forward pass; lower it if VRAM is tight |
 | `SUBBATCH_SECONDS` | `0` (off) | Hard cap on one forward pass, in audio seconds. Bounds how long a live step can wait behind a file; see [Performance](#performance). CPU profiles ship `30` |
 
-### Voice activity detection
+#### Voice activity detection
 
 Requires the `vad` extra. See [Voice activity detection](#voice-activity-detection).
 
@@ -845,7 +836,7 @@ Requires the `vad` extra. See [Voice activity detection](#voice-activity-detecti
 | `VAD_MIN_SPEECH_MS` | `250` | Shortest run of speech worth keeping |
 | `VAD_MIN_SILENCE_MS` | `300` | Silence that ends a speech region |
 
-### Throughput
+#### Throughput
 
 These trade latency for throughput and are the knobs that matter when serving
 more than one client at a time. See [Performance](#performance).
@@ -860,7 +851,7 @@ more than one client at a time. See [Performance](#performance).
 | `TF32` | `true` | Allow TF32 matmuls on Ampere+ (CUDA only); `false` for exact FP32 |
 | `CPU_THREADS` | auto | torch thread count for the CPU profile; set it when the container has a cgroup quota |
 
-### Streaming
+#### Streaming
 
 | Variable | Default | Notes |
 | --- | --- | --- |
@@ -869,7 +860,7 @@ more than one client at a time. See [Performance](#performance).
 | `STREAM_STEP_SECONDS` | `0.48` | One encoder chunk; leave it alone |
 | `MAX_STREAM_SECONDS` | `3600.0` | Reject longer streams |
 
-### HTTP
+#### HTTP
 
 | Variable | Default | Notes |
 | --- | --- | --- |
@@ -883,13 +874,13 @@ more than one client at a time. See [Performance](#performance).
 hard error, so the GPUStack probe does not flap during a multi-minute first
 start. See [Observability](#observability) for the full response.
 
-## Performance
+### Performance
 
 QUAN-Transcribe is a CTC model: one forward pass per piece of audio, no
 autoregressive loop and no KV cache. So the useful optimisation is different
 from an LLM server's, and there are four levers, in rough order of impact.
 
-### 1. The engine core: one owner, priority, coalescing, backpressure
+#### 1. The engine core: one owner, priority, coalescing, backpressure
 
 The model is not re-entrant, so exactly one thread may touch it at a time. That
 thread is the *engine core* (`app/core.py`); every request, streaming or batch,
@@ -946,7 +937,7 @@ is working and whether you are shedding load. See
 
 Try `MICROBATCH_SECONDS=0` first if you serve one client at a time.
 
-### 2. TF32 on Ampere and later
+#### 2. TF32 on Ampere and later
 
 `TF32=true` (the default) lets FP32 matmuls run on the tensor cores. For a CTC
 model the precision loss is immaterial next to the speedup, and it is a no-op
@@ -955,7 +946,7 @@ before Ampere and on CPU. Set `TF32=false` if you need bit-exact FP32.
 The model already autocasts the encoder to bf16 on CUDA, so there is no bf16
 knob to turn: it is on whenever the device is CUDA.
 
-### 3. The language model is a CPU bottleneck
+#### 3. The language model is a CPU bottleneck
 
 With `USE_LM=true` the beam search runs on the CPU, one utterance at a time,
 *after* the GPU forward pass. At beam 32 it is roughly 15 ms per utterance on a
@@ -964,7 +955,7 @@ finishes and waits. If throughput matters more than the last two WER points,
 leave the LM off; if accuracy matters more, turn it on and give the worker spare
 CPU. Raising or lowering `BEAM_WIDTH` moves this cost linearly.
 
-### 4. CPU is a different machine
+#### 4. CPU is a different machine
 
 On CPU there is no fast device to hide behind, so the model is a plain FP32
 GEMM pipeline that scales with cores and with batch width:
@@ -995,7 +986,7 @@ step preempt a file — so on CPU set `SUBBATCH_SECONDS` and a small
 scheduler saw. A quick health check: under steady concurrent load, `batches_run`
 should be well below `jobs_run`, and `shed` should stay at zero.
 
-## Docker
+### Docker
 
 ```bash
 ./scripts/build.sh                          # -> quan-asr-server:1.0.0
@@ -1119,7 +1110,8 @@ Google's [EmbeddingGemma 2](https://huggingface.co/google/embeddinggemma-2).
 
 ## Licence
 
-This server is released under **Apache-2.0** (see `pyproject.toml`).
+The code in this repository — the `quan_transcribe` inference library and the
+`app` serving layer — is released under **Apache-2.0** (see `pyproject.toml`).
 
 The **model weights are not** Apache-2.0: `QUAN-Transcribe-1.0` is a derivative
 of EmbeddingGemma 2 and is governed by the
